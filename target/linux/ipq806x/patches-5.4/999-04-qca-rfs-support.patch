@@ -1,0 +1,12 @@
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -1376,6 +1376,9 @@ struct net_device_ops {
+ 						     const struct sk_buff *skb,
+ 						     u16 rxq_index,
+ 						     u32 flow_id);
++	/* QCA RFS Support - Start */
++	int			(*ndo_get_default_vlan_tag)(struct net_device *net);
++	/* QCA RFS Support - Start */
+ #endif
+ 	int			(*ndo_add_slave)(struct net_device *dev,
+ 						 struct net_device *slave_dev,
