@@ -28,7 +28,7 @@ define KernelPackage/shortcut-fe-drv
   SECTION:=kernel
   CATEGORY:=Kernel modules
   SUBMENU:=Network Support
-  DEPENDS:=+kmod-shortcut-fe
+  DEPENDS:=@TARGET_ipq806x||TARGET_ipq807x +kmod-shortcut-fe
   TITLE:=Simulated sfe driver for ECM
   FILES:=$(PKG_BUILD_DIR)/simulated-driver/shortcut-fe-drv.ko
   AUTOLOAD:=$(call AutoLoad,10,shortcut-fe-drv)
