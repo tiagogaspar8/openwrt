@@ -122,6 +122,9 @@ endif
 ifneq ($(CONFIG_BUSYBOX_$(BUSYBOX_SYM)_FEATURE_SUID),)
 	$(INSTALL_SUID) $(PKG_INSTALL_DIR)/bin/busybox $(1)/bin/busybox
 endif
+ifneq ($(CONFIG_BUSYBOX_$(BUSYBOX_SYM)_TELNETD),)
+	$(INSTALL_BIN) ./files/telnetd.init $(1)/etc/init.d/telnetd
+endif
 	-rm -rf $(1)/lib64
 endef
 
