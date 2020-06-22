@@ -46,6 +46,7 @@ define KernelPackage/qca-nss-ecm/Default
 	+iptables-mod-physdev \
 	+kmod-pppoe @!LINUX_3_18 \
 	+PACKAGE_kmod-qca-ovsmgr:kmod-qca-ovsmgr \
+	+kmod-shortcut-fe-drv \
 	+kmod-ipsec
   TITLE:=QCA NSS Enhanced Connection Manager (ECM)
   FILES:=$(PKG_BUILD_DIR)/*.ko $(FILES_EXAMPLES)
