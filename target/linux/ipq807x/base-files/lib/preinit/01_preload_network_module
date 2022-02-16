@@ -1,0 +1,7 @@
+set_preinit_net_module() {
+
+	# Load the required networking modules for failsafe
+	/sbin/modprobe /lib/modules/*/qca-nss-dp.ko
+}
+
+boot_hook_add failsafe set_preinit_net_module
