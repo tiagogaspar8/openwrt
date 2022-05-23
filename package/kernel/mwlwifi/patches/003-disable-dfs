@@ -1,0 +1,34 @@
+From b017b048140c4cc94c2284e5c34aec821580481d Mon Sep 17 00:00:00 2001
+From: Camilo Schoeningh <camilo.schoeningh@dunnhumby.com>
+Date: Sun, 14 Jul 2019 12:29:16 +0200
+Subject: [PATCH] Disable DFS
+
+https://github.com/kaloz/mwlwifi/issues/75#issuecomment-452602226
+---
+ hif/pcie/pcie.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/hif/pcie/pcie.c b/hif/pcie/pcie.c
+index 3fbb170..c203891 100644
+--- a/hif/pcie/pcie.c
++++ b/hif/pcie/pcie.c
+@@ -456,8 +456,7 @@ static irqreturn_t pcie_isr(struct ieee80211_hw *hw)
+ 		}
+
+ 		if (int_status & MACREG_A2HRIC_BIT_RADAR_DETECT) {
+-			wiphy_info(hw->wiphy, "radar detected by firmware\n");
+-			ieee80211_radar_detected(hw);
++			wiphy_info(hw->wiphy, "ignored: radar detected by firmware\n");
+ 		}
+
+ 		if (int_status & MACREG_A2HRIC_BIT_QUE_EMPTY) {
+@@ -923,8 +922,7 @@ static irqreturn_t pcie_isr_ndp(struct ieee80211_hw *hw)
+ 		}
+
+ 		if (int_status & MACREG_A2HRIC_NEWDP_DFS) {
+-			wiphy_info(hw->wiphy, "radar detected by firmware\n");
+-			ieee80211_radar_detected(hw);
++			wiphy_info(hw->wiphy, "ignored: radar detected by firmware\n");
+ 		}
+
+ 		if (int_status & MACREG_A2HRIC_NEWDP_CHANNEL_SWITCH)
