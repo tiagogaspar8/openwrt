@@ -1,0 +1,75 @@
+#!/bin/sh /etc/rc.common
+
+USE_PROCD=1
+
+START=80
+STOP=80
+
+PROG="/usr/sbin/rpcapd"
+
+config_parser(){
+
+    #read general config and add it as a parameter
+    config_get_bool debug general debug 0
+    config_get_bool active_mode_only general active_mode_only 0
+    config_get_bool null_authentication general null_authentication 0
+
+    [ $debug -gt 0 ] && procd_append_param command '-D'
+	[ $active_mode_only -gt 0 ] && procd_append_param command '-v'X
+	[ $null_authentication -gt 0 ] && procd_append_param command '-n'
+
+    config_get_bool ipv4_only network ipv4_only 0
+    config_get bind_address network bind_address
+    config_get bind_port network bind_port
+    config_get active_host network active_host
+
+
+	[ $ipv4_only -gt 0 ] && procd_append_param command '-4'
+	[ -n "$bind_address" ] && procd_append_param command '-b "$bind_address"'
+	[ -n "$bind_port" ] && procd_append_param command '-p "$bind_port"'
+	[ -n "$active_host" ] && procd_append_param command '-a "$active_host"'
+
+
+    hosts=""
+
+    parse_hosts() {
+
+        if [[ -n "hosts" ]]; then
+            hosts="$1"
+        else
+            hosts="$hosts,$1"
+        fi
+    }
+
+    config_list_foreach network host_list parse_hosts
+	[ -n "$active_host" ] && procd_append_param command '-a "$active_host"'
+}
+
+start_service() {
+
+    enabled=0
+
+	config_load "rpcapd"
+
+	#verify if the service is enabled in the configuration and populate it's variable
+	config_get_bool enabled general enabled 0
+
+	#If the main service is not enabled exit
+    if [ "$1" -gt 0 ]; then
+	    [ "$enabled" -eq 0 ] && return 1
+    fi
+
+	procd_open_instance
+	procd_set_param command "$PROG"
+    procd_set_param stdout 1
+
+    config_parser 
+
+	procd_set_param respawn
+	procd_close_instance
+}
+
+
+stop() {
+
+}
