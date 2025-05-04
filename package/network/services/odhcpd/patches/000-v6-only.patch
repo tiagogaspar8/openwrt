@@ -1,0 +1,191 @@
+From b224e1c53e456981846d9462d5e0da287e82fd62 Mon Sep 17 00:00:00 2001
+From: Jonathan Duncan <JonathanDuncan@gmail.com>
+Date: Thu, 3 Apr 2025 12:04:18 +0100
+Subject: [PATCH] Add support for RFC8925 IPv6-Only Preferred Option for DHCPv4
+
+Adds a new interface configuration variable `dhcpv4_ipv6only` which
+enables support for RFC8925 IPv6-Only Preferred mode, along with
+`dhcpv4_ipv6only_wait` which configures the time clients should wait
+before checking DHCPv4 again.
+
+This means that IPv6-mostly networks that provide still provide an IPv4
+DHCP server for legacy clients can allows clients that support IPv6-only
+to opt-out of having an IPv4 address assigned to them.
+
+Notably MacOS 12, iOS 15 and Android 12 all support RFC8925 currently.
+---
+ README       |  5 ++++-
+ src/config.c | 19 +++++++++++++++++++
+ src/dhcpv4.c | 33 +++++++++++++++++++++++++++------
+ src/dhcpv4.h |  1 +
+ src/odhcpd.h |  1 +
+ 5 files changed, 52 insertions(+), 7 deletions(-)
+
+diff --git a/README b/README
+index 80e8a450..1da80176 100644
+--- a/README
++++ b/README
+@@ -158,7 +158,10 @@ prefix_filter		string	::/0			Only advertise on-link prefixes within
+ 							filtered out.
+ ntp			list	<local address>		NTP servers to announce
+ 							accepts IPv4 and IPv6
+-
++dhcpv4_ipv6only         bool    0                       Enable support for IPv6-Only Preferred
++                                                        option in DHCPv4 responses (RFC8925)
++dhcpv4_ipv6only_wait	integer 1800                    The number of seconds for which the
++                                                        client should disable DHCPv4, Range [300+]
+ 
+ Sections of type host (static leases)
+ Option		Type	Default			Description
+diff --git a/src/config.c b/src/config.c
+index 1a2d392b..28fedf31 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -111,6 +111,8 @@ enum {
+ 	IFACE_ATTR_PREFIX_FILTER,
+ 	IFACE_ATTR_PREFERRED_LIFETIME,
+ 	IFACE_ATTR_NTP,
++	IFACE_ATTR_IPV6ONLY,
++	IFACE_ATTR_IPV6ONLY_WAIT,
+ 	IFACE_ATTR_MAX
+ };
+ 
+@@ -165,6 +167,8 @@ static const struct blobmsg_policy iface_attrs[IFACE_ATTR_MAX] = {
+ 	[IFACE_ATTR_PREFIX_FILTER] = { .name = "prefix_filter", .type = BLOBMSG_TYPE_STRING },
+ 	[IFACE_ATTR_PREFERRED_LIFETIME] = { .name = "preferred_lifetime", .type = BLOBMSG_TYPE_STRING },
+ 	[IFACE_ATTR_NTP] = { .name = "ntp", .type = BLOBMSG_TYPE_ARRAY },
++	[IFACE_ATTR_IPV6ONLY] = { .name = "dhcpv4_ipv6only", .type = BLOBMSG_TYPE_BOOL },
++	[IFACE_ATTR_IPV6ONLY_WAIT] = { .name = "dhcpv4_ipv6only_wait", .type = BLOBMSG_TYPE_INT32 },
+ };
+ 
+ static const struct uci_blob_param_info iface_attr_info[IFACE_ATTR_MAX] = {
+@@ -1452,6 +1456,21 @@ int config_parse_interface(void *data, size_t len, const char *name, bool overwr
+ 		}
+ 	}
+ 
++	if ((c = tb[IFACE_ATTR_IPV6ONLY])) {
++		if (blobmsg_get_bool(c)) {
++			iface->ipv6only_wait = 1800;
++		}
++	}
++	
++	if ((c = tb[IFACE_ATTR_IPV6ONLY_WAIT])) {
++		uint32_t ipv6only_wait = blobmsg_get_u32(c);
++
++		if (ipv6only_wait >= 300)
++			iface->ipv6only_wait = ipv6only_wait;
++		else
++			iface->ipv6only_wait = 300;
++	}
++
+ 	return 0;
+ 
+ err:
+diff --git a/src/dhcpv4.c b/src/dhcpv4.c
+index 1ae7254d..982b0cd0 100644
+--- a/src/dhcpv4.c
++++ b/src/dhcpv4.c
+@@ -669,6 +669,7 @@ void dhcpv4_handle_msg(void *addr, void *data, size_t len,
+ 	size_t reqopts_len = 0;
+ 	bool accept_fr_nonce = false;
+ 	bool incl_fr_opt = false;
++	bool ipv6_only = false;
+ 
+ 	uint8_t *start = &req->options[4];
+ 	uint8_t *end = ((uint8_t*)data) + len;
+@@ -709,6 +710,15 @@ void dhcpv4_handle_msg(void *addr, void *data, size_t len,
+ 		}
+ 	}
+ 
++	/* Check if this client would prefer IPv6 only and we're configured to allow it */
++	for (size_t opt = 0; opt < reqopts_len; opt++) {
++		switch (reqopts[opt]) {
++		case DHCPV4_OPT_IPV6_ONLY:
++			ipv6_only = (iface->ipv6only_wait != 0);
++			break;
++		}
++	}
++	
+ 	if (reqmsg != DHCPV4_MSG_DISCOVER && reqmsg != DHCPV4_MSG_REQUEST &&
+ 	    reqmsg != DHCPV4_MSG_INFORM && reqmsg != DHCPV4_MSG_DECLINE &&
+ 	    reqmsg != DHCPV4_MSG_RELEASE)
+@@ -718,13 +728,17 @@ void dhcpv4_handle_msg(void *addr, void *data, size_t len,
+ 	uint32_t serverid = iface->dhcpv4_local.s_addr;
+ 	uint32_t fr_serverid = INADDR_ANY;
+ 
+-	if (reqmsg != DHCPV4_MSG_INFORM)
++	if ((reqmsg != DHCPV4_MSG_INFORM) && !ipv6_only)
+ 		a = dhcpv4_lease(iface, reqmsg, req->chaddr, reqaddr,
+ 				 &leasetime, hostname, hostname_len,
+ 				 accept_fr_nonce, &incl_fr_opt, &fr_serverid,
+ 				 reqopts, reqopts_len);
+ 
+-	if (!a) {
++	/* 
++	 * RFC8925: If this client prefers IPv6 only, we don't have an assignment for it,
++	 * but we still want to send a positive response with the address INADDR_ANY .
++	 */
++	if (!a && !ipv6_only) {
+ 		if (reqmsg == DHCPV4_MSG_REQUEST)
+ 			msg = DHCPV4_MSG_NAK;
+ 		else if (reqmsg == DHCPV4_MSG_DISCOVER)
+@@ -732,8 +746,8 @@ void dhcpv4_handle_msg(void *addr, void *data, size_t len,
+ 	} else if (reqmsg == DHCPV4_MSG_DISCOVER)
+ 		msg = DHCPV4_MSG_OFFER;
+ 	else if (reqmsg == DHCPV4_MSG_REQUEST &&
+-			((reqaddr && reqaddr != a->addr) ||
+-			 (req->ciaddr.s_addr && req->ciaddr.s_addr != a->addr))) {
++			(a && ((reqaddr && reqaddr != a->addr) ||
++			 (req->ciaddr.s_addr && req->ciaddr.s_addr != a->addr)))) {
+ 		msg = DHCPV4_MSG_NAK;
+ 		/*
+ 		 * DHCP client requested an IP which we can't offer to him. Probably the
+@@ -859,8 +873,8 @@ void dhcpv4_handle_msg(void *addr, void *data, size_t len,
+ 		dhcpv4_put(&reply, &cookie, DHCPV4_OPT_DNSSERVER,
+ 				4 * iface->dhcpv4_dns_cnt, iface->dhcpv4_dns);
+ 
+-	for (size_t opt = 0; a && opt < a->reqopts_len; opt++) {
+-		switch (a->reqopts[opt]) {
++	for (size_t opt = 0; opt < reqopts_len; opt++) {
++		switch (reqopts[opt]) {
+ 		case DHCPV4_OPT_NTPSERVER:
+ 			dhcpv4_put(&reply, &cookie, DHCPV4_OPT_NTPSERVER,
+ 				   4 * iface->dhcpv4_ntp_cnt, iface->dhcpv4_ntp);
+@@ -926,6 +940,13 @@ void dhcpv4_handle_msg(void *addr, void *data, size_t len,
+ 			dhcpv4_put(&reply, &cookie, DHCPV4_OPT_DNR,
+ 				   dnrs_len, dnrs);
+ 			break;
++		case DHCPV4_OPT_IPV6_ONLY:
++			if (ipv6_only) {
++				uint32_t ipv6only_wait = htons(iface->ipv6only_wait);
++				dhcpv4_put(&reply, &cookie, DHCPV4_OPT_IPV6_ONLY,
++					sizeof(uint32_t), &ipv6only_wait);
++			}
++			break;
+ 		}
+ 	}
+ 
+diff --git a/src/dhcpv4.h b/src/dhcpv4.h
+index f02529f4..04c5380b 100644
+--- a/src/dhcpv4.h
++++ b/src/dhcpv4.h
+@@ -58,6 +58,7 @@ enum dhcpv4_opt {
+ 	DHCPV4_OPT_REQUEST = 17,
+ 	DHCPV4_OPT_USER_CLASS = 77,
+ 	DHCPV4_OPT_AUTHENTICATION = 90,
++	DHCPV4_OPT_IPV6_ONLY = 108,
+ 	DHCPV4_OPT_SEARCH_DOMAIN = 119,
+ 	DHCPV4_OPT_FORCERENEW_NONCE_CAPABLE = 145,
+ 	DHCPV4_OPT_DNR = 162,
+diff --git a/src/odhcpd.h b/src/odhcpd.h
+index 779f50f8..5e552e08 100644
+--- a/src/odhcpd.h
++++ b/src/odhcpd.h
+@@ -363,6 +363,7 @@ struct interface {
+ 	struct in_addr *dhcpv4_dns;
+ 	size_t dhcpv4_dns_cnt;
+ 	bool dhcpv4_forcereconf;
++	uint32_t ipv6only_wait;
+ 
+ 	// DNS
+ 	struct in6_addr *dns;
