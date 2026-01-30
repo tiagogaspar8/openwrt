@@ -103,6 +103,12 @@ endef
 define Package/rpcapd/install
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/rpcapd $(1)/usr/sbin/
+
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/rpcap.init $(1)/etc/init.d/rpcap
+	
+	$(INSTALL_DIR) $(1)/etc/config
+	$(INSTALL_CONF) ./files/rpcap.conf $(1)/etc/config/rpcap
 endef
 
 $(eval $(call BuildPackage,libpcap))
